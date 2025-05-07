@@ -1,17 +1,37 @@
 from enum import IntEnum
+from typing import Annotated as A
+
+from bluesky.protocols import Movable, Stoppable
+
 from ophyd import (
     Device,
     Component,
     EpicsSignal,
     EpicsSignalRO,
     PVPositionerIsClose,
-    Kind
+    Kind,
 )
+
+from ophyd_async.core import (
+    SignalR,
+    SignalRW,
+    SignalX,
+    StandardReadable,
+    WatchableAsyncStatus,
+    DEFAULT_TIMEOUT,
+)
+from ophyd_async.core import StandardReadableFormat as Format
+from ophyd_async.epics.core import EpicsDevice, PvSuffix as Pv
+from ophyd_async.epics.core import epics_signal_r, epics_signal_w, epics_signal_rw
+
+from .async_positioner import BasePositioner
 from ..utils.signals import EpicsSignalMon
+
 
 class EpicsSignalIDs(PVPositionerIsClose):
     setpoint = Component(EpicsSignal, "-SP")
     readback = Component(EpicsSignalMon, "")
+
 
 # Reference:
 # https://cnpemcamp.sharepoint.com/:x:/s/Comissionamento/Eabdu5JQhm1Oh8xjo25QNkEBeA8lLoRFrrTI0nVYT6t9aw?e=JnWNx9
@@ -90,9 +110,7 @@ class UndulatorKymaAPU(Device):
     is_remote = Component(EpicsSignalMon, "IsRemote", lazy=True, kind=Kind.omitted)
     interface = Component(EpicsSignalMon, "Interface", lazy=True, kind=Kind.omitted)
 
-    home_axis = Component(
-        EpicsSignal, "HomeAxis-Sel", lazy=True, kind=Kind.omitted
-    )
+    home_axis = Component(EpicsSignal, "HomeAxis-Sel", lazy=True, kind=Kind.omitted)
 
     phase = Component(
         EpicsSignalIDs,
@@ -146,9 +164,7 @@ class UndulatorKymaAPU(Device):
         OpWarning = 0x48
         Op = 0x4C
 
-    phase_alarm = Component(
-        EpicsSignalMon, "AlrmPhase", lazy=True, kind=Kind.omitted
-    )
+    phase_alarm = Component(EpicsSignalMon, "AlrmPhase", lazy=True, kind=Kind.omitted)
     # Reference:
     # https://infosys.beckhoff.com/english.php?content=../content/1033/tcncerrcode2/index.html
     phase_alarm_errid = Component(
@@ -197,3 +213,55 @@ class UndulatorKymaAPU(Device):
     beamline_control_status = Component(
         EpicsSignalRO, "BeamLineCtrlEnbl-Sts", lazy=True, kind=Kind.omitted
     )
+
+
+class _IVUPositioner(BasePositioner, EpicsDevice):
+    setpoint: A[SignalRW[float], Pv("-RB"), Pv("-SP")]
+    readback: A[SignalR[float], Pv("-Mon"), Format.HINTED_SIGNAL]
+
+    actuate_value = 1
+    done_value = 0
+
+    def __init__(self, prefix: str, parent_prefix: str, name: str = ""):
+        with self.add_children_as_readables():
+            self.actuate = epics_signal_w(str, f"{parent_prefix}KParamChange-Cmd")
+            self.done = epics_signal_r(bool, f"{parent_prefix}Moving-Mon")
+
+        super().__init__(prefix=prefix, name=name)
+
+
+class IVU(EpicsDevice, StandardReadable, Movable, Stoppable):
+    control_enabled: A[SignalR[bool], Pv("BeamLineCtrl-Mon")]
+    is_moving: A[SignalR[bool], Pv("Moving-Mon")]
+
+    abort: A[SignalX, Pv("Abort-Cmd")]
+    reset: A[SignalX, Pv("Reset-Cmd")]
+
+    def __init__(self, prefix: str, name: str = "", supports_step_scan: bool = False):
+        self.gap = _IVUPositioner(prefix + "KParam", prefix)
+        self.velocity = _IVUPositioner(prefix + "KParamVelo", prefix)
+
+        self.add_readables([self.gap.readback], Format.HINTED_SIGNAL)
+
+        if supports_step_scan:
+            with self.add_children_as_readables():
+                self.step_mode = epics_signal_rw(bool, prefix + "Step_Mode")
+                self.read_csv = epics_signal_rw(
+                    bool, prefix + "Read_State", prefix + "Read_StepCsv"
+                )
+                self.scan_done = epics_signal_r(bool, prefix + "Scan_Done")
+
+        super().__init__(prefix=prefix, name=name)
+
+    @WatchableAsyncStatus.wrap
+    async def set(self, new_gap: float, timeout=DEFAULT_TIMEOUT):
+        control_enabled = await self.control_enabled.get_value()
+        if not control_enabled:
+            raise PermissionError(
+                f"Tried to move the IVU while control is not enabled ({self.control_enabled.source})."
+            )
+
+        await self.gap.set(new_gap, timeout=timeout)
+
+    async def stop(self, success=True):
+        await self.abort.trigger()
