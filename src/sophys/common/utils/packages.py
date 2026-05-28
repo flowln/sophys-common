@@ -106,17 +106,17 @@ def _run_command(
     return _proc
 
 
-StrSequenceType: typing.TypeAlias = typing.Tuple[str, ...]
+StrSequenceType: typing.TypeAlias = tuple[str, ...]
 
 
 def install_packages(
-    *package_specs: Unpack[StrSequenceType],
-    extra_index_url: typing.Optional[list[str]] = None,
+    *package_specs: *StrSequenceType,
+    extra_index_url: list[str] | None = None,
     force_reinstall: bool = False,
     disable_cache: bool = False,
     debug: bool = False,
     backend: PackageManagementBackend | str = PackageManagementBackend.PIP,
-    custom_python_executable: typing.Optional[str] = None,
+    custom_python_executable: str | None = None,
 ):
     """
     Install a package in the current environment.
