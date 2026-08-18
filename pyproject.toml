@@ -21,7 +21,7 @@ dynamic = ["version"]
 dependencies = [
   "bluesky",
   "ophyd",
-  "ophyd-async",
+  "ophyd-async~=0.21.1",
   "numpy",
   "requests",
   "strenum ; python_version < '3.11'",
