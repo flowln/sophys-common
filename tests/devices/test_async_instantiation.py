@@ -8,6 +8,14 @@ from ophyd_async.epics.motor import Motor
 from sophys.common.utils.registry import register_async_devices, get_named_registry
 
 
+@pytest.fixture(scope="session", autouse=True)
+def skip_if_aioca_not_present():
+    pytest.importorskip(
+        "aioca",
+        reason="Package 'aioca' is not installed, and is required for the ophyd-async tests.",
+    )
+
+
 @pytest.mark.timeout(0.5)
 async def test_single_mock_instantiation():
     async with init_devices(mock=True, timeout=1.0):

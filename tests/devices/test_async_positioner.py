@@ -18,6 +18,14 @@ from ophyd_async.testing import (
 from sophys.common.devices.async_positioner import BasePositioner
 
 
+@pytest.fixture(scope="session", autouse=True)
+def skip_if_aioca_not_present():
+    pytest.importorskip(
+        "aioca",
+        reason="Package 'aioca' is not installed, and is required for the ophyd-async tests.",
+    )
+
+
 async def _test_positioner_movement(
     positioner: BasePositioner,
     before_set_func=None,
