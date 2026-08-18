@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, SplitResult
 from requests import get as http_get, Response as HttpResponse
 import tempfile
 
-from typing_extensions import Unpack, cast
+from typing import cast
 
 try:
     from enum import StrEnum
@@ -101,7 +101,7 @@ def _run_command(
         print("  Standard error:")
         print(e.stderr)
 
-        raise RuntimeError
+        raise RuntimeError from e
 
     return _proc
 
